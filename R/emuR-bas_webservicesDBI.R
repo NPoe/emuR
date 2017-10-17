@@ -63,7 +63,7 @@ bas_run_asr_dbi <- function(handle,
       samplerate = bas_get_samplerate(handle, session, bundle)
       
       if (resume &&
-          bas_label_exists_in_bundle(handle, session, bundle, mausAttributeDefinitionName))
+          bas_label_exists_in_bundle(handle, session, bundle, orthoAttributeDefinitionName))
       {
         if (verbose)
         {
