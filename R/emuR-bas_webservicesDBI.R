@@ -1,4 +1,239 @@
 #####################################################################
+############################## ASR ##################################
+#####################################################################
+
+bas_run_asr_dbi <- function(handle,
+                            orthoAttributeDefinitionName,
+                            language,
+                            verbose,
+                            params,
+                            rootLevel,
+                            resume,
+                            oldBasePath,
+                            perspective,
+                            patience,
+                            type = type,
+                            func)
+{
+  if(type != "SEGMENT" & type != "ITEM") {
+    stop("Parameter levelType must be one of SEGMENT, ITEM")
+  }
+  
+  service = "runASR"
+  workdir = bas_workdir(handle, func)
+  
+  orthoLevel = orthoAttributeDefinitionName
+  
+  bas_check_this_is_a_new_label(handle, orthoAttributeDefinitionName)
+  
+  bundles_list = bas_evaluate_language_option(handle = handle, language = language)
+  
+  if(!is.null(rootLevel))
+  {
+    if (is.null(get_levelDefinition(handle, rootLevel)))
+    {
+      stop("Could not find level ", rootLevel)
+    }
+  }
+  
+  if (nrow(bundles_list) > 0)
+  {
+    bas_ping(verbose)
+    if (verbose)
+    {
+      cat("INFO: Running ASR on emuDB containing",
+          nrow(bundles_list),
+          "bundle(s)...\n")
+      progress = 0
+      pb = utils::txtProgressBar(
+        min = 0,
+        max = nrow(bundles_list),
+        initial = 0,
+        style = 3
+      )
+      utils::setTxtProgressBar(pb, progress)
+    }
+    
+    for (bundle_idx in 1:nrow(bundles_list))
+    {
+      bundle = bundles_list[bundle_idx, "bundle"]
+      session = bundles_list[bundle_idx, "session"]
+      language = bundles_list[bundle_idx, "language"]
+      
+      samplerate = bas_get_samplerate(handle, session, bundle)
+      
+      if (resume &&
+          bas_label_exists_in_bundle(handle, session, bundle, mausAttributeDefinitionName))
+      {
+        if (verbose)
+        {
+          cat("\nSkipping bundle", bundle)
+        }
+        next
+      }
+      
+      seq_idx = 1
+      top_id = bas_get_top_id(handle, session, bundle, rootLevel)
+      max_id = bas_get_max_id(handle, session, bundle)
+      
+      worfile = file.path(workdir, paste0(bundle, ".wor.par"))
+      signalfile = bas_get_signal_path(handle, session, bundle, oldBasePath)
+      
+      curlParams = list(
+        LANGUAGE = language,
+        OUTFORMAT = "bpf",
+        SIGNAL = RCurl::fileUpload(signalfile)
+      )
+      
+      for (key in names(params))
+      {
+        if (!(key %in% names(curlParams)))
+        {
+          curlParams[[key]] = params[[key]]
+        }
+      }
+      
+      worLines = bas_curl(service, curlParams, worfile, session, bundle, patience)
+      
+      next_start = 0
+      
+      if(type == "SEGMENT"){
+        key = "WOR"
+      }
+      else{
+        key = "ORT"
+      }
+      
+      if (length(worLines) > 0)
+      {
+        for (line_idx in 1:length(worLines))
+        {
+          line = worLines[line_idx]
+          if (stringr::str_detect(line, paste0("^", key, ":")))
+          {
+            if(type == "SEGMENT")
+            {
+              splitline = stringr::str_split_fixed(line, "\\s+", n = 5)
+              start = as.integer(splitline[2])
+              duration = as.integer(splitline[3])
+              label = stringr::str_replace_all(stringr::str_trim(splitline[5]), "'", "''")
+              
+              # insert padding segment if necessary
+              if(next_start < start && next_start > 0)
+              {
+                item_id = max_id + seq_idx
+                bas_add_item(
+                  handle = handle,
+                  session = session,
+                  bundle = bundle,
+                  seq_idx = seq_idx,
+                  item_id = item_id,
+                  level =
+                    orthoLevel,
+                  samplerate = samplerate,
+                  type = type,
+                  sample_start = next_start,
+                  sample_dur = start - next_start - 2
+                )
+                
+                bas_add_label(
+                  handle = handle,
+                  session = session,
+                  bundle = bundle,
+                  item_id = item_id,
+                  label_idx = 1,
+                  label_name =
+                    orthoAttributeDefinitionName,
+                  label = ""
+                )
+                1
+                seq_idx = seq_idx + 1
+                
+              }
+              next_start = start + duration + 1
+            }
+            else
+            {
+              splitline = stringr::str_split_fixed(line, "\\s+", n = 3)
+              start = "NULL"
+              duration = "NULL"
+              label = stringr::str_replace_all(stringr::str_trim(splitline[3]), "'", "''")
+            }
+            item_id = max_id + seq_idx
+            
+            
+            bas_add_item(
+              handle = handle,
+              session = session,
+              bundle = bundle,
+              seq_idx = seq_idx,
+              item_id = item_id,
+              level =
+                orthoLevel,
+              samplerate = samplerate,
+              type = type,
+              sample_start = start,
+              sample_dur = duration
+            )
+            
+            seq_idx = seq_idx + 1
+            
+            bas_add_label(
+              handle = handle,
+              session = session,
+              bundle = bundle,
+              item_id = item_id,
+              label_idx = 1,
+              label_name =
+                orthoAttributeDefinitionName,
+              label = label
+            )
+            
+            if (!is.null(top_id))
+            {
+              bas_add_link(
+                handle = handle,
+                session = session,
+                bundle = bundle,
+                from_id = top_id,
+                to_id = item_id
+              )
+            }
+          }
+        }
+      }
+      if (verbose)
+      {
+        utils::setTxtProgressBar(pb, bundle_idx)
+      }
+    }
+  }
+  if (verbose)
+  {
+    cat("\n")
+  }
+  
+  add_levelDefinition(handle,
+                      orthoLevel,
+                      type,
+                      verbose = FALSE,
+                      rewriteAllAnnots = FALSE)
+  
+  if(type == "SEGMENT")
+  {
+    bas_new_canvas(handle, perspective, orthoLevel)
+  }
+  
+  if(!is.null(rootLevel))
+  {
+    add_linkDefinition(handle, "ONE_TO_MANY", rootLevel, orthoLevel)
+  }
+  
+  orthoDescription = bas_paste_description("Automatic speech recognition", NULL, service, params)
+  set_attributeDescription(handle, orthoLevel, orthoAttributeDefinitionName, orthoDescription)
+}
+
+#####################################################################
 ############################# MAUS ##################################
 #####################################################################
 

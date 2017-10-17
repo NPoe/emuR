@@ -652,3 +652,57 @@ runBASwebservice_pho2sylSegmental <- function(handle,
   
   rewrite_allAnnots(handle, verbose = verbose)
 }
+
+
+
+#####################################################################
+############################# ASR ###################################
+#####################################################################
+
+##' Creates a word segmentation via automatic speech recognition.
+##'
+##' This function creates an orthographic word level using the BAS ASR web service.
+##' Please note that the accuracy of the ASR result will vary dpending on audio quality and language, 
+##' and that you are unlikely to get the quality of a manual transcription.
+##'
+##' All necessary level, link and parameter definitions are created in the process.
+##' @family BAS webservice functions
+##' @export
+##'
+##' @param levelType If ITEM, words are stored as symbolic items; if SEGMENT, temporal information is saved as well.
+##' We suggest you use ITEM if you plan on doing a MAUS segmentation afterwards.
+##' @inheritParams runBASwebservice_all
+##' @inheritParams runBASwebservice_chunker
+
+runBASwebservice_asr <- function(handle,
+                                 language,
+                                 orthoAttributeDefinitionName = "ORT",
+                                 levelType = "SEGMENT",
+                                 
+                                 rootLevel = NULL,
+                                 params = list(),
+                                 
+                                 perspective = "default",
+                                 patience = 0,
+                                 resume = FALSE,
+                                 verbose = TRUE)
+{
+  func = "ASR"
+  oldBasePath = handle$basePath
+  handle = bas_prepare(handle, resume, verbose, func)
+  bas_run_asr_dbi(handle = handle,
+                  orthoAttributeDefinitionName = orthoAttributeDefinitionName,
+                  language = language,
+                  verbose = verbose,
+                  params = params,
+                  rootLevel = rootLevel,
+                  resume = resume,
+                  oldBasePath = oldBasePath,
+                  perspective = perspective,
+                  patience = patience,
+                  type = levelType,
+                  func = func)
+  
+  handle = bas_clear(handle, oldBasePath, func)
+  rewrite_allAnnots(handle, verbose = verbose)
+}
