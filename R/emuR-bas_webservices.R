@@ -24,6 +24,8 @@
 ##' @export
 ##' @param handle emuDB handle
 ##' @param transcriptionAttributeDefinitionName name of the attribute (not level!) containing an orthographic transcription.
+##' If NULL, BAS ASR (automatic speech recognition) is used to infer the transcription.
+##' Note that segmentation quality is likely to be inferior if this route is used!
 ##' @param language language(s) to be used. If you pass a single string (e.g. "deu-DE"), this language will be used for all bundles.
 ##' Alternatively, you can select the language for every bundle individually. To do so, you must pass a data frame with the columns
 ##' session, bundle, language. This data frame must contain one row for every bundle in your emuDB.
@@ -64,25 +66,29 @@ runBASwebservice_all <- function(handle,
                                  verbose = TRUE)
 {
   func = "all"
-  transcriptionLevel = get_levelNameForAttributeName(handle, transcriptionAttributeDefinitionName)
-  
   oldBasePath = handle$basePath
-  
-  if (is.null(transcriptionLevel)) {
-    stop("Could not find a level for attribute ", transcriptionAttributeDefinitionName)
-  }
-  
   running_chunker = FALSE
   chunkLevel = NULL
+  handle = bas_prepare(handle, resume, verbose, func)
   
-  # if our transcription is a segment level, we assume it is a manual chunk segmentation
-  if (get_levelDefinition(handle, transcriptionLevel)$type == "SEGMENT") {
-    chunkLevel = transcriptionLevel # the transcription is the chunk segmentation
-    usetrn = "true" # we use it for MAUS
+  if(!is.null(transcriptionAttributeDefinitionName))
+  {
+    transcriptionLevel = get_levelNameForAttributeName(handle, transcriptionAttributeDefinitionName)
+  
+    if (is.null(transcriptionLevel)) {
+      stop("Could not find a level for attribute ", transcriptionAttributeDefinitionName)
+    }
+    
+    # if our transcription is a segment level, we assume it is a manual chunk segmentation
+    if (get_levelDefinition(handle, transcriptionLevel)$type == "SEGMENT") {
+      chunkLevel = transcriptionLevel # the transcription is the chunk segmentation
+      usetrn = "true" # we use it for MAUS
+    }
   }
   
+  
   # else, we check if we will need to perform automatic chunk segmentation
-  else if (bas_long_enough_for_chunker(handle, oldBasePath)) {
+  if (is.null(chunkLevel) && bas_long_enough_for_chunker(handle, oldBasePath)) {
     running_chunker = TRUE # we need to run the chunker
     chunkLevel = chunkAttributeDefinitionName
     usetrn = "true" # the to-be-created chunk segmentation will be used for MAUS
@@ -94,19 +100,36 @@ runBASwebservice_all <- function(handle,
     usetrn = "false"
   }
   
-  handle = bas_prepare(handle, resume, verbose, func)
-  
-  bas_run_g2p_for_tokenization_dbi(
-    handle = handle,
-    transcriptionAttributeDefinitionName = transcriptionAttributeDefinitionName,
-    orthoAttributeDefinitionName = orthoAttributeDefinitionName,
-    language = language,
-    verbose = verbose,
-    resume = resume,
-    params = list(),
-    func = func,
-    patience = patience
-  )
+  if(!is.null(transcriptionAttributeDefinitionName))
+  {
+    bas_run_g2p_for_tokenization_dbi(
+      handle = handle,
+      transcriptionAttributeDefinitionName = transcriptionAttributeDefinitionName,
+      orthoAttributeDefinitionName = orthoAttributeDefinitionName,
+      language = language,
+      verbose = verbose,
+      resume = resume,
+      params = list(),
+      func = func,
+      patience = patience
+    )
+  }
+  else
+  {
+    bas_run_asr_dbi(
+      handle = handle,
+      orthoAttributeDefinitionName = orthoAttributeDefinitionName,
+      language = language,
+      verbose = verbose,
+      params = list(),
+      rootLevel = NULL,
+      resume = resume,
+      oldBasePath = oldBasePath,
+      perspective = perspective,
+      patience = patience,
+      type = "ITEM",
+      func = func)
+  }
   
   bas_run_g2p_for_pronunciation_dbi(
     handle = handle,
